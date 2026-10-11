@@ -463,6 +463,12 @@ async function serviceCommand(args) {
   throw new Error('Gunakan: termux-ai service start|status|pending|stop|boot');
 }
 
+async function allInOne(args) {
+  await startService(args);
+  await bootCommand(['install']);
+  console.log('\nSetup terpadu selesai: AI aktif sekarang dan skrip boot telah dipasang. Pastikan aplikasi Termux:Boot Android terpasang dan pernah dibuka sekali.');
+}
+
 async function approveAction(id) {
   const info = readServiceInfo();
   const result = await serviceRequest(info, 'GET', '/v1/pending');
@@ -575,13 +581,14 @@ async function editFile(fileArg, instruction) {
 }
 
 function showHelp() {
-  console.log(`Asisten coding AI untuk Termux; provider OpenAI-compatible.\n\nPerintah:\n  termux-ai setup\n  termux-ai chat\n  termux-ai service start [--root folder] [--port 18781]\n  termux-ai service status|pending|stop\n  termux-ai service boot install|status|remove\n  termux-ai ask <pertanyaan> [--file <path-relatif>]\n  termux-ai review [path-relatif]\n  termux-ai edit <file-relatif> <instruksi>\n  termux-ai command <tugas-perintah>\n  termux-ai approve <id-usulan>\n  termux-ai hermes [argumen Hermes...]\n  termux-ai config`);
+  console.log(`Asisten coding AI untuk Termux; provider OpenAI-compatible.\n\nPerintah:\n  termux-ai setup\n  termux-ai chat\n  termux-ai all-in-one --root <folder-proyek> [--port 18781]\n  termux-ai service start [--root folder] [--port 18781]\n  termux-ai service status|pending|stop\n  termux-ai service boot install|status|remove\n  termux-ai ask <pertanyaan> [--file <path-relatif>]\n  termux-ai review [path-relatif]\n  termux-ai edit <file-relatif> <instruksi>\n  termux-ai command <tugas-perintah>\n  termux-ai approve <id-usulan>\n  termux-ai hermes [argumen Hermes...]\n  termux-ai config`);
 }
 
 async function main(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   try {
     if (command === '__server') return await runLocalServer();
+    if (command === 'all-in-one') return await allInOne(args);
     if (command === 'service') return await serviceCommand(args);
     if (command === 'approve') {
       if (!args[0]) throw new Error('Gunakan: termux-ai approve <id-usulan>');

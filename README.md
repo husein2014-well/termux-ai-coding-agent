@@ -15,27 +15,17 @@ termux-ai setup
 
 Installer menyimpan source JavaScript di `~/.local/share/termux-ai-coding-agent`. Tidak membutuhkan Python atau paket npm tambahan. API key disimpan lokal di `~/.config/termux-ai/config.json` dengan permission terbatas.
 
-## Mode otomatis terbatas dan mulai saat boot
+## Mode otomatis terbatas dan integrasi boot satu perintah
 
-Pilih folder proyek. Daemon membatasi baca/tulis file ke folder tersebut:
+> **Setup terpadu:** pasang aplikasi **Termux:Boot** dari sumber yang sama dengan Termux dan buka sekali. Android mensyaratkan add-on terpisah ini; Termux:Boot tidak dapat digabung menjadi satu APK dengan CLI AI. Setelah itu, satu perintah menyalakan AI sekaligus memasang skrip startup:
 
 ```sh
-termux-ai service start --root ~/projects/nama-project
+termux-ai all-in-one --root ~/projects/nama-project
 ```
 
-### Aktifkan mulai otomatis
+Perintah tersebut mengaktifkan daemon sekarang dan mengonfigurasi Termux:Boot untuk menjalankannya lagi setelah boot. Ganti path proyek dengan workspace Anda. Verifikasi dengan `termux-ai service status` dan `termux-ai service boot status`. Petunjuk upstream untuk add-on Android: [Termux:Boot](https://github.com/termux/termux-boot).
 
-1. Pasang aplikasi **Termux:Boot** dari sumber yang sama dengan aplikasi Termux, lalu buka Termux:Boot sekali. [Petunjuk upstream](https://github.com/termux/termux-boot) menyatakan langkah awal ini diperlukan agar skrip dapat dijalankan saat boot.
-2. Di Termux, pasang skrip startup untuk workspace daemon yang sedang aktif:
-
-   ```sh
-   termux-ai service boot install
-   termux-ai service boot status
-   ```
-
-3. Setelah ponsel direstart, periksa dengan `termux-ai service status`.
-
-Matikan mulai otomatis dengan `termux-ai service boot remove`; hentikan daemon dengan `termux-ai service stop`. Skrip tidak mengaktifkan `termux-wake-lock`, jadi Android masih dapat menangguhkan proses saat perangkat tidur atau menerapkan optimasi baterai. Ini tidak menjamin daemon selalu hidup.
+Jika ingin mengatur terpisah: `termux-ai service start --root <folder>` lalu `termux-ai service boot install`. Hapus startup dengan `termux-ai service boot remove`; hentikan daemon dengan `termux-ai service stop`. Skrip tidak mengaktifkan `termux-wake-lock`, sehingga Android masih dapat menangguhkan proses saat perangkat tidur atau menerapkan optimasi baterai. Ini tidak menjamin daemon selalu hidup.
 
 ### Batas otomatisasi
 
