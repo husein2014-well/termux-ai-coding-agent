@@ -15,6 +15,16 @@ termux-ai setup
 
 Installer menyimpan source JavaScript di `~/.local/share/termux-ai-coding-agent`. Tidak membutuhkan Python atau paket npm tambahan. API key disimpan lokal di `~/.config/termux-ai/config.json` dengan permission terbatas.
 
+Kelola token API provider tanpa menuliskan rahasia sebagai argumen command (agar tidak masuk history shell):
+
+```sh
+termux-ai token set      # input disembunyikan
+termux-ai token status   # hanya menampilkan empat karakter terakhir
+termux-ai token remove
+```
+
+Token digunakan untuk autentikasi ke API provider yang dikonfigurasi; ini bukan token login/akses perangkat. Jangan bagikan file konfigurasi atau token.
+
 ## Mode otomatis terbatas dan integrasi boot satu perintah
 
 > **Setup terpadu:** pasang aplikasi **Termux:Boot** dari sumber yang sama dengan Termux dan buka sekali. Android mensyaratkan add-on terpisah ini; Termux:Boot tidak dapat digabung menjadi satu APK dengan CLI AI. Setelah itu, satu perintah menyalakan AI sekaligus memasang skrip startup:

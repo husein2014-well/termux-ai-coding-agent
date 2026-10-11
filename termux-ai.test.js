@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { safeContextFile, readContext, stripFence, makeDiff, insideWorkspace, isAutoEditable, autoCommandSpec } = require('./termux-ai.js');
+const { safeContextFile, readContext, stripFence, makeDiff, insideWorkspace, isAutoEditable, autoCommandSpec, maskToken } = require('./termux-ai.js');
 
 test('secret paths are excluded from model context', () => {
   assert.equal(safeContextFile('/project/.env'), false);
@@ -71,4 +71,10 @@ test('automatic command allowlist rejects shell injection and npm scripts', () =
     assert.equal(autoCommandSpec('git status --short; touch /tmp/bad', root), null);
     assert.equal(autoCommandSpec('node --check ../outside.js', root), null);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('token status never reveals the full API token', () => {
+  assert.equal(maskToken(''), 'belum diatur');
+  assert.equal(maskToken('super-secret-token'), 'tersimpan (••••oken)');
+  assert.doesNotMatch(maskToken('super-secret-token'), /super-secret-token/);
 });
