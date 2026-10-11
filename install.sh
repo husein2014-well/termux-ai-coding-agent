@@ -22,5 +22,5 @@ cat > "$BIN_DIR/termux-ai" <<EOF
 exec node "$APP_DIR/termux-ai.js" "\$@"
 EOF
 chmod 755 "$BIN_DIR/termux-ai"
-echo "Installed termux-ai (Node.js). Jalankan: termux-ai setup"
+echo "Installed termux-ai (Node.js). Jalankan: termux-ai setup; setelah bot Telegram aktif, minta /key lalu jalankan: termux-ai login"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "Tambahkan ke PATH jika perintah tidak ditemukan: export PATH=\"$BIN_DIR:\$PATH\"";; esac

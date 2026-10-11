@@ -11,9 +11,11 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'termux-ai');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
+const LOGIN_PATH = path.join(CONFIG_DIR, 'login.json');
 const SERVICE_PATH = path.join(CONFIG_DIR, 'service.json');
 const SERVICE_LOG = path.join(CONFIG_DIR, 'service.log');
 const BOOT_SCRIPT = path.join(os.homedir(), '.termux', 'boot', 'termux-ai-daemon');
+const DEFAULT_AUTH_API_URL = 'https://termux-ai-login.xtc7418.workers.dev';
 const DEFAULTS = { base_url: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini', api_key: '', provider_name: 'OpenRouter' };
 const SYSTEM = 'You are a careful coding assistant running in Termux. Be concise, explain assumptions, and never claim to have executed code or changed files. For code edits return the complete replacement file only when explicitly asked.';
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.idea', '.vscode', '.termux-ai-backups']);
@@ -45,6 +47,57 @@ function saveConfig(config) {
   fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
   fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
   try { fs.chmodSync(CONFIG_PATH, 0o600); } catch {}
+}
+
+function readLogin() {
+  try { return JSON.parse(fs.readFileSync(LOGIN_PATH, 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw new Error(`Data login tidak dapat dibaca: ${error.message}`); }
+}
+
+async function validateLoginKey(key) {
+  const endpoint = process.env.TERMUX_AI_AUTH_URL || DEFAULT_AUTH_API_URL;
+  let response;
+  try {
+    response = await fetch(`${endpoint.replace(/\/+$/, '')}/v1/auth/validate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key }), signal: AbortSignal.timeout(15000),
+    });
+  } catch (error) { throw new Error(`Tidak dapat menghubungi layanan login: ${error.message}`); }
+  let result;
+  try { result = await response.json(); } catch { throw new Error('Respons layanan login tidak valid.'); }
+  if (!response.ok || result.valid !== true) throw new Error('Key login tidak valid, dicabut, atau kedaluwarsa. Minta key baru lewat bot Telegram.');
+  return result;
+}
+
+async function requireLogin() {
+  const login = readLogin();
+  if (!login?.key) throw new Error('Belum login. Jalankan: termux-ai login');
+  const result = await validateLoginKey(login.key);
+  return result;
+}
+
+async function loginCommand(args) {
+  const action = args[0];
+  if (action === 'logout') {
+    try { fs.unlinkSync(LOGIN_PATH); console.log('Login key dihapus dari perangkat ini.'); }
+    catch (error) { if (error.code === 'ENOENT') console.log('Tidak ada sesi login lokal.'); else throw error; }
+    return;
+  }
+  if (action === 'status') {
+    const login = readLogin();
+    if (!login?.key) { console.log('Belum login. Jalankan: termux-ai login'); return; }
+    const result = await validateLoginKey(login.key);
+    console.log(`Login aktif${result.expires_at ? ` hingga ${result.expires_at} UTC` : ''}.`);
+    return;
+  }
+  if (action && action !== 'set') throw new Error('Gunakan: termux-ai login [set|status|logout]');
+  const key = await hiddenQuestion('Key login dari bot Telegram (input disembunyikan): ');
+  if (!key) throw new Error('Key kosong; tidak ada perubahan.');
+  const result = await validateLoginKey(key);
+  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(LOGIN_PATH, `${JSON.stringify({ key, expires_at: result.expires_at || null })}\n`, { mode: 0o600 });
+  try { fs.chmodSync(LOGIN_PATH, 0o600); } catch {}
+  console.log(`Login berhasil. Key tersimpan lokal di ${LOGIN_PATH} dengan izin terbatas.`);
 }
 
 function normalQuestion(prompt) {
@@ -94,6 +147,7 @@ async function setup() {
 }
 
 async function complete(messages, config = loadConfig()) {
+  await requireLogin();
   if (!config.api_key) throw new Error('API key belum diatur. Jalankan: termux-ai setup');
   const url = `${config.base_url.replace(/\/+$/, '')}/chat/completions`;
   let response;
@@ -318,6 +372,7 @@ async function runLocalServer() {
         return jsonResponse(res, 200, { id, type: 'command', target: root, command, message: `Belum dijalankan. Periksa dan setujui: termux-ai approve ${id}` });
       }
       if (req.method === 'POST' && url.pathname === '/v1/approve') {
+        await requireLogin();
         const body = await readRequestJson(req);
         const item = pending.get(body.id);
         if (!item || item.expires < Date.now()) { pending.delete(body.id); throw new Error('Usulan tidak ditemukan atau sudah kedaluwarsa.'); }
@@ -581,14 +636,15 @@ async function editFile(fileArg, instruction) {
 }
 
 function showHelp() {
-  console.log(`Asisten coding AI untuk Termux; provider OpenAI-compatible.\n\nPerintah:\n  termux-ai setup\n  termux-ai chat\n  termux-ai all-in-one --root <folder-proyek> [--port 18781]\n  termux-ai service start [--root folder] [--port 18781]\n  termux-ai service status|pending|stop\n  termux-ai service boot install|status|remove\n  termux-ai ask <pertanyaan> [--file <path-relatif>]\n  termux-ai review [path-relatif]\n  termux-ai edit <file-relatif> <instruksi>\n  termux-ai command <tugas-perintah>\n  termux-ai approve <id-usulan>\n  termux-ai hermes [argumen Hermes...]\n  termux-ai config`);
+  console.log(`Asisten coding AI untuk Termux; provider OpenAI-compatible.\n\nPerintah:\n  termux-ai setup\n  termux-ai login [set|status|logout]\n  termux-ai chat\n  termux-ai all-in-one --root <folder-proyek> [--port 18781]\n  termux-ai service start [--root folder] [--port 18781]\n  termux-ai service status|pending|stop\n  termux-ai service boot install|status|remove\n  termux-ai ask <pertanyaan> [--file <path-relatif>]\n  termux-ai review [path-relatif]\n  termux-ai edit <file-relatif> <instruksi>\n  termux-ai command <tugas-perintah>\n  termux-ai approve <id-usulan>\n  termux-ai hermes [argumen Hermes...]\n  termux-ai config`);
 }
 
 async function main(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
   try {
     if (command === '__server') return await runLocalServer();
-    if (command === 'all-in-one') return await allInOne(args);
+    if (command === 'all-in-one') { await requireLogin(); return await allInOne(args); }
+    if (command === 'login') return await loginCommand(args);
     if (command === 'service') return await serviceCommand(args);
     if (command === 'approve') {
       if (!args[0]) throw new Error('Gunakan: termux-ai approve <id-usulan>');
@@ -624,6 +680,7 @@ async function main(argv = process.argv.slice(2)) {
       return await editFile(args[0], args.slice(1).join(' '));
     }
     if (command === 'hermes') {
+      await requireLogin();
       const result = spawnSync('hermes', args, { stdio: 'inherit' });
       if (result.error) throw new Error('Perintah hermes tidak ditemukan. Pasang/configure Hermes upstream terlebih dahulu; lihat panduan Termux di README.');
       process.exitCode = result.status ?? 1;

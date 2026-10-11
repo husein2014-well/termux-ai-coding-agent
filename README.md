@@ -15,6 +15,43 @@ termux-ai setup
 
 Installer menyimpan source JavaScript di `~/.local/share/termux-ai-coding-agent`. Tidak membutuhkan Python atau paket npm tambahan. API key disimpan lokal di `~/.config/termux-ai/config.json` dengan permission terbatas.
 
+## Login key melalui bot Telegram
+
+Backend validasi sudah disiapkan di Cloudflare Worker dan database D1. Bot hanya menerbitkan key lewat private chat Telegram. **Bot memerlukan token dari pemilik proyek sebelum aktif**; token bot dan webhook secret jangan dikirim lewat chat atau commit ke GitHub.
+
+### Aktivasi bot satu kali oleh pemilik
+
+1. Buat bot privat/publik melalui [@BotFather](https://t.me/BotFather) dengan `/newbot`, lalu simpan token yang diberikan.
+2. Di Cloudflare Dashboard buka **Workers & Pages → `termux-ai-login` → Settings → Variables and Secrets**. Tambahkan dua *Secret*: `TELEGRAM_BOT_TOKEN` (token BotFather) dan `TELEGRAM_WEBHOOK_SECRET`.
+3. Buat nilai acak untuk webhook secret di terminal lokal, misalnya:
+
+   ```sh
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+   ```
+
+   Masukkan nilai yang sama ke Secret Cloudflare. Klik **Save and deploy**.
+4. Di Termux jalankan helper dari clone repo yang sudah dipasang. Helper meminta token dan secret secara tersembunyi, lalu memasang webhook ke endpoint HTTPS:
+
+   ```sh
+   cd ~/.local/share/termux-ai-coding-agent/cloudflare-auth
+   node setup-telegram-webhook.mjs
+   ```
+
+5. Buka chat privat dengan bot yang baru dibuat; kirim `/start`, lalu `/key`. Salin key satu kali yang dikirim bot.
+
+### Login pengguna
+
+```sh
+termux-ai login          # tempel key; input disembunyikan
+termux-ai login status   # cek keabsahan ke Worker
+termux-ai login logout   # hapus sesi key lokal
+termux-ai setup          # konfigurasi API key provider AI secara terpisah
+```
+
+Key berlaku **365 hari**, hanya hash SHA-256 yang disimpan di D1, dan satu akun Telegram hanya memiliki satu key aktif. Meminta `/key` lagi mengganti key lama (ada jeda 60 detik); `/revoke` mencabut key. CLI menyimpan key di `~/.config/termux-ai/login.json` dengan permission `0600` dan memvalidasi ke Worker melalui HTTPS untuk setiap permintaan model. Jika layanan tidak dapat dihubungi, akses ditolak. Login key bukan pengganti API key provider; pengguna tetap perlu mengatur provider lewat `termux-ai setup`.
+
+Bot ini memakai model **self-service**: siapa pun yang bisa chat bot dapat meminta key. Untuk membatasi akses hanya ke orang tertentu, pemilik harus menambahkan allowlist/approval sebelum membagikan username bot. Source terbuka bisa dimodifikasi oleh pengguna, jadi ini bukan mekanisme DRM yang tahan bypass.
+
 ## Mode otomatis terbatas dan integrasi boot satu perintah
 
 > **Setup terpadu:** pasang aplikasi **Termux:Boot** dari sumber yang sama dengan Termux dan buka sekali. Android mensyaratkan add-on terpisah ini; Termux:Boot tidak dapat digabung menjadi satu APK dengan CLI AI. Setelah itu, satu perintah menyalakan AI sekaligus memasang skrip startup:

@@ -1,0 +1,13 @@
+name = "termux-ai-login"
+main = "worker.mjs"
+compatibility_date = "2026-10-11"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "termux-ai-login"
+database_id = "cb4e2e8c-40d2-4492-ab5e-85365411c6a6"
+migrations_dir = "migrations"
+
+[vars]
+TELEGRAM_WEBHOOK_PATH = "dfb4e5509e06af740534abea7231b00c2438d2a3dbf738536c4a6675e5341ab9"
