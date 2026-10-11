@@ -1,0 +1,17 @@
+{
+  "name": "termux-ai-coding-assistant",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Termux-first AI coding assistant using JavaScript and Node.js",
+  "main": "termux-ai.js",
+  "bin": {
+    "termux-ai": "termux-ai.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
