@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { safeContextFile, readContext, stripFence, makeDiff } = require('./termux-ai.js');
+const { safeContextFile, readContext, stripFence, makeDiff, insideWorkspace } = require('./termux-ai.js');
 
 test('secret paths are excluded from model context', () => {
   assert.equal(safeContextFile('/project/.env'), false);
@@ -37,4 +37,19 @@ test('edit diff shows only changed lines with nearby context', () => {
   assert.match(diff, /-two/);
   assert.match(diff, /\+changed/);
   assert.match(diff, /--- file\.js/);
+});
+
+test('workspace path checks reject traversal and external symlinks', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'termux-ai-scope-'));
+  const root = path.join(base, 'workspace');
+  const outside = path.join(base, 'outside.txt');
+  fs.mkdirSync(root);
+  fs.writeFileSync(path.join(root, 'app.js'), 'ok');
+  fs.writeFileSync(outside, 'private');
+  try {
+    assert.equal(insideWorkspace(root, 'app.js'), path.join(root, 'app.js'));
+    assert.throws(() => insideWorkspace(root, '../outside.txt'), /outside|folder proyek/i);
+    fs.symlinkSync(outside, path.join(root, 'link.txt'));
+    assert.throws(() => insideWorkspace(root, 'link.txt'), /Symlink\/path berada di luar/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });

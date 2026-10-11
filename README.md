@@ -1,12 +1,12 @@
 # Termux AI Coding Assistant
 
-CLI asisten coding untuk Android Termux yang ditulis dalam **JavaScript dan berjalan dengan Node.js**. Menggabungkan pengalaman tanya-jawab dan bantuan kode bergaya Blackbox AI dengan konteks project dan usulan edit bergaya Cursor. Mendukung endpoint chat-completions OpenAI-compatible (misalnya OpenRouter, OpenAI, atau endpoint sendiri) serta dapat meneruskan argumen ke Hermes Agent yang sudah terpasang.
+CLI asisten coding untuk Android Termux yang ditulis dalam **JavaScript dan Node.js**. Menggabungkan tanya-jawab coding, konteks project, dan usulan edit. Mendukung provider chat-completions OpenAI-compatible dan bisa meneruskan argumen ke Hermes Agent yang telah terpasang.
 
-> Ini proyek komunitas independen, bukan produk resmi Blackbox AI, Cursor, atau Nous Research. Anda perlu API key/model sendiri; biaya penggunaan provider, bila ada, ditagihkan oleh provider.
+> Proyek komunitas independen, bukan produk resmi Blackbox AI, Cursor, atau Nous Research. Anda perlu API key/model sendiri; biaya provider, bila ada, ditagihkan oleh provider.
 
-## Instalasi di Termux dari GitHub
+## Instalasi dari GitHub
 
-Di aplikasi Termux, jalankan:
+Di aplikasi Termux:
 
 ```sh
 pkg update
@@ -15,42 +15,66 @@ curl -fsSL https://raw.githubusercontent.com/husein2014-well/termux-ai-coding-ag
 termux-ai setup
 ```
 
-Installer meng-clone source JavaScript ke `~/.local/share/termux-ai-coding-agent` dan membuat perintah `termux-ai`. Tidak membutuhkan Python atau paket npm tambahan. Setup meminta provider, base URL, model, dan API key secara interaktif. API key disimpan di `~/.config/termux-ai/config.json` dengan permission terbatas, tidak masuk ke repository.
+Installer memasang source JavaScript ke `~/.local/share/termux-ai-coding-agent` dan membuat perintah `termux-ai`. Tidak membutuhkan Python atau paket npm tambahan. API key disimpan lokal di `~/.config/termux-ai/config.json` dengan permission terbatas. Contoh OpenRouter: base URL `https://openrouter.ai/api/v1` dan model yang tersedia pada akun Anda.
 
-Contoh OpenRouter: base URL `https://openrouter.ai/api/v1`, model yang tersedia di akun Anda (misalnya `openai/gpt-4o-mini`). Model/provider dapat berubah; periksa katalog provider Anda.
+## Menyalakan akses lokal latar belakang
 
-## Perintah
+Pilih folder project yang akan boleh dibaca/diubah, lalu mulai daemon:
 
 ```sh
-termux-ai setup
+termux-ai service start --root ~/projects/nama-project
+termux-ai service status
+```
+
+Daemon berjalan di latar belakang **selama Termux aktif**, mendengarkan hanya pada `127.0.0.1` (perangkat itu sendiri), dan membatasi operasi file ke folder yang dipilih. Path traversal dan symlink ke luar folder ditolak. API lokal memakai token acak yang disimpan di `~/.config/termux-ai/service.json` dengan izin file terbatas. Daemon tidak meminta akses root, kamera, mikrofon, lokasi, kontak, atau SMS. Ia tidak dikonfigurasi untuk mulai saat ponsel boot. Android masih dapat menangguhkan atau menghentikan proses Termux.
+
+Contoh saat daemon aktif:
+
+```sh
+termux-ai ask "Jelaskan struktur aplikasi ini" --file src/app.js
+termux-ai review src
+termux-ai edit src/app.js "Tambahkan validasi input"
+termux-ai service pending
+termux-ai approve <id-usulan>
+termux-ai service stop
+```
+
+Perintah `edit` membuat usulan dan menampilkan diff; perubahan belum diterapkan sampai Anda menjalankan `approve` dan mengonfirmasi `y`. Usulan yang menunggu persetujuan hanya disimpan di memori daemon dan hilang jika daemon berhenti.
+
+AI juga dapat **mengusulkan** perintah terminal:
+
+```sh
+termux-ai command "Jalankan tes project"
+termux-ai approve <id-usulan>
+```
+
+Perintah terminal tidak dijalankan otomatis. `approve` menampilkan teks perintah persisnya dan meminta persetujuan terlebih dahulu. **Penting:** setelah disetujui, perintah shell berjalan dengan izin akun Termux dan secara teknis dapat membaca atau mengubah berkas di luar folder project. Jika Anda ingin batas folder project yang ketat, jangan setujui usulan perintah shell; operasi baca/edit file melalui daemon tetap dibatasi ke workspace.
+
+Untuk memulai ulang layanan setelah Termux ditutup, jalankan lagi perintah `service start`. Installer tidak memasang Termux:Boot dan tidak mengubah pengaturan baterai Android.
+
+## Perintah tanpa daemon
+
+```sh
 termux-ai chat
-termux-ai ask "Jelaskan fungsi file ini" --file app.js
+termux-ai ask "Jelaskan kode ini" --file app.js
 termux-ai review ./src
 termux-ai edit app.js "Tambahkan validasi input"
 termux-ai config
 ```
 
-`edit` menampilkan usulan diff dan **tidak menulis perubahan sampai Anda menjawab `y`**. `review` membaca file teks project, mengabaikan `.git`, `node_modules`, virtualenv, dan cache; batasnya 12 file per folder dan 100.000 karakter konteks. File yang tampak rahasia (`.env`, kunci privat, dan nama berisi `secret`/`credential`) dikecualikan. Hindari mengirim informasi sensitif ke layanan model.
+Saat daemon aktif, operasi tanya/review/edit diarahkan melalui batas workspace daemon. Tanpa daemon, perintah CLI berjalan langsung dan file yang Anda sebutkan dikirim ke provider AI; hindari memilih file sensitif.
 
-### Hermes Agent
+## Hermes Agent
 
-Jika perintah `hermes` tersedia, argumen dapat diteruskan dengan `termux-ai hermes --help` atau `termux-ai hermes`. Hermes adalah proyek upstream terpisah; installer ini tidak memasangnya. Dokumentasi upstream menyediakan paket APT khusus Termux untuk perangkat ARM64, tetapi saat ini menyatakan paket Termux sedang mengalami masalah. Ikuti status dan instruksi terbaru di [panduan resmi Hermes untuk Termux](https://hermes-agent.nousresearch.com/docs/getting-started/termux); jangan gunakan installer desktop/server mereka di Android.
+Jika perintah `hermes` tersedia, gunakan `termux-ai hermes --help` atau `termux-ai hermes`. Hermes adalah proyek upstream terpisah dan tidak dipasang oleh installer ini. Periksa [panduan resmi Hermes untuk Termux](https://hermes-agent.nousresearch.com/docs/getting-started/termux) untuk status kompatibilitas terbaru.
 
-## Keamanan & catatan
+## Keamanan & pengembangan
 
-- CLI mengirim prompt dan konteks file yang dipilih ke endpoint provider yang Anda setel.
-- File config berisi API key dan permission file dibatasi pada sistem yang mendukung permission POSIX.
-- Periksa diff dan buat backup/commit sebelum mengubah file penting.
-- Provider harus mendukung `POST /chat/completions` dan format respons OpenAI-compatible.
-- Aplikasi ini tidak menjalankan shell command/code secara otomatis; ia memberi jawaban dan usulan edit yang Anda setujui sendiri.
-
-## Pengembangan
-
-Tidak ada dependensi eksternal. Jalankan tes bawaan Node.js:
-
-```sh
-node --test
-```
+- Prompt dan konteks file yang dipilih dikirim ke endpoint provider AI Anda.
+- `.env`, kunci privat, nama file berisi `secret`/`credential`, serta folder `.git`, `node_modules`, virtualenv, dan cache dikecualikan dari konteks.
+- Daemon menerima koneksi hanya dari localhost dan memerlukan bearer token. Jangan membagikan file `service.json`.
+- Tinjau diff dan teks lengkap perintah sebelum menyetujui. Tidak ada perintah shell yang berjalan tanpa persetujuan melalui CLI.
+- Tanpa dependensi tambahan. Jalankan tes dengan `node --test`.
 
 ## Lisensi
 
