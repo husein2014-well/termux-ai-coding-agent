@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { safeContextFile, readContext, stripFence, makeDiff, insideWorkspace } = require('./termux-ai.js');
+const { safeContextFile, readContext, stripFence, makeDiff, insideWorkspace, isAutoEditable, autoCommandSpec } = require('./termux-ai.js');
 
 test('secret paths are excluded from model context', () => {
   assert.equal(safeContextFile('/project/.env'), false);
@@ -52,4 +52,23 @@ test('workspace path checks reject traversal and external symlinks', () => {
     fs.symlinkSync(outside, path.join(root, 'link.txt'));
     assert.throws(() => insideWorkspace(root, 'link.txt'), /Symlink\/path berada di luar/);
   } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('automatic edits exclude package configuration and include source files only', () => {
+  assert.equal(isAutoEditable('/project/src/app.js'), true);
+  assert.equal(isAutoEditable('/project/package.json'), false);
+  assert.equal(isAutoEditable('/project/.env'), false);
+});
+
+test('automatic command allowlist rejects shell injection and npm scripts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'termux-ai-allow-'));
+  try {
+    fs.writeFileSync(path.join(root, 'app.js'), 'const x = 1;');
+    assert.ok(autoCommandSpec('git status --short', root));
+    assert.ok(autoCommandSpec('git diff --check', root));
+    assert.ok(autoCommandSpec('node --check app.js', root));
+    assert.equal(autoCommandSpec('npm test', root), null);
+    assert.equal(autoCommandSpec('git status --short; touch /tmp/bad', root), null);
+    assert.equal(autoCommandSpec('node --check ../outside.js', root), null);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

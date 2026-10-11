@@ -13,10 +13,13 @@ const CONFIG_DIR = path.join(os.homedir(), '.config', 'termux-ai');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 const SERVICE_PATH = path.join(CONFIG_DIR, 'service.json');
 const SERVICE_LOG = path.join(CONFIG_DIR, 'service.log');
+const BOOT_SCRIPT = path.join(os.homedir(), '.termux', 'boot', 'termux-ai-daemon');
 const DEFAULTS = { base_url: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini', api_key: '', provider_name: 'OpenRouter' };
 const SYSTEM = 'You are a careful coding assistant running in Termux. Be concise, explain assumptions, and never claim to have executed code or changed files. For code edits return the complete replacement file only when explicitly asked.';
-const IGNORED_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.idea', '.vscode']);
+const IGNORED_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.idea', '.vscode', '.termux-ai-backups']);
 const IGNORED_NAMES = new Set(['.env', '.env.local', '.env.production', 'secrets.json', 'credentials.json', 'id_rsa', 'id_ed25519']);
+const AUTO_EDIT_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.html', '.css', '.scss']);
+const GIT_BIN = path.join(process.env.PREFIX || '/usr', 'bin', 'git');
 
 function safeContextFile(file) {
   const absolute = path.resolve(file);
@@ -193,6 +196,35 @@ function insideWorkspace(root, requested, mustExist = true) {
   return actual;
 }
 
+function isAutoEditable(file) {
+  return safeContextFile(file) && AUTO_EDIT_EXTENSIONS.has(path.extname(file).toLowerCase());
+}
+
+function autoCommandSpec(command, root) {
+  const gitArgs = {
+    'git status --short': ['-c', 'core.fsmonitor=false', '--no-pager', 'status', '--short', '--untracked-files=no'],
+    'git diff --check': ['-c', 'core.fsmonitor=false', '--no-pager', 'diff', '--check', '--no-ext-diff', '--no-textconv'],
+    'git diff --stat': ['-c', 'core.fsmonitor=false', '--no-pager', 'diff', '--stat', '--no-ext-diff', '--no-textconv'],
+    'git diff --name-only': ['-c', 'core.fsmonitor=false', '--no-pager', 'diff', '--name-only', '--no-ext-diff', '--no-textconv'],
+  };
+  if (gitArgs[command]) return { executable: GIT_BIN, args: ['-C', root, ...gitArgs[command]] };
+  const match = /^node --check ([A-Za-z0-9_./-]{1,240})$/.exec(command);
+  if (!match) return null;
+  try {
+    const file = insideWorkspace(root, match[1]);
+    if (!new Set(['.js', '.mjs', '.cjs']).has(path.extname(file).toLowerCase()) || !fs.statSync(file).isFile()) return null;
+    return { executable: process.execPath, args: ['--check', file] };
+  } catch { return null; }
+}
+
+function safeAutoEnv() {
+  const bin = process.env.PREFIX ? path.join(process.env.PREFIX, 'bin') : '/usr/bin';
+  return {
+    HOME: os.homedir(), PATH: `${bin}:/bin`, LANG: 'C', LC_ALL: 'C',
+    GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0',
+  };
+}
+
 function jsonResponse(res, status, value) {
   const body = JSON.stringify(value);
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store' });
@@ -249,6 +281,16 @@ async function runLocalServer() {
         const revised = stripFence(await complete([{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }]));
         const preview = makeDiff(original, revised, path.relative(root, filename));
         if (!preview) return jsonResponse(res, 200, { changed: false, message: 'Tidak ada perubahan yang diusulkan.' });
+        if (isAutoEditable(filename)) {
+          const current = fs.readFileSync(filename, 'utf8');
+          if (crypto.createHash('sha256').update(current).digest('hex') !== crypto.createHash('sha256').update(original).digest('hex')) throw new Error('File berubah saat AI mengedit. Tidak ada perubahan yang diterapkan; coba lagi.');
+          const backupDir = path.join(root, '.termux-ai-backups');
+          fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+          const backupPath = path.join(backupDir, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.bak`);
+          fs.writeFileSync(backupPath, original, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+          fs.writeFileSync(filename, revised, 'utf8');
+          return jsonResponse(res, 200, { changed: true, autoApplied: true, target: path.relative(root, filename), preview, backup: path.relative(root, backupPath), message: 'Perubahan diterapkan otomatis sesuai mode terbatas. Backup lokal dibuat.' });
+        }
         const id = crypto.randomBytes(8).toString('hex');
         pending.set(id, { type: 'edit', target: filename, originalHash: crypto.createHash('sha256').update(original).digest('hex'), revised, preview, expires: Date.now() + 15 * 60 * 1000 });
         return jsonResponse(res, 200, { changed: true, id, type: 'edit', target: path.relative(root, filename), preview, message: `Belum diterapkan. Lihat usulan: termux-ai approve ${id}` });
@@ -257,11 +299,20 @@ async function runLocalServer() {
         const body = await readRequestJson(req);
         if (typeof body.request !== 'string' || !body.request.trim() || body.request.length > 4000) throw new Error('Permintaan perintah wajib diisi (maksimal 4.000 karakter).');
         const answer = (await complete([
-          { role: 'system', content: 'Suggest one shell command for the stated coding task, using the project working directory. Return only the exact command text, no markdown and no explanation. Never execute it.' },
+          { role: 'system', content: 'For coding tasks, prefer one exact command from this strict safe allowlist only: `git status --short`, `git diff --check`, `git diff --stat`, `git diff --name-only`, or `node --check <relative .js/.mjs/.cjs file>`. If none safely fits, return exactly NO_SAFE_COMMAND. Return one line only, no markdown or explanation. Never execute commands.' },
           { role: 'user', content: `Folder proyek: ${root}\nTugas: ${body.request}` },
         ])).trim();
         const command = stripFence(answer).trim();
         if (!command || command.length > 5000) throw new Error('Usulan perintah kosong atau terlalu panjang.');
+        if (command === 'NO_SAFE_COMMAND') return jsonResponse(res, 200, { autoExecuted: false, requiresApproval: false, message: 'Tidak ada perintah yang sesuai dengan allowlist otomatis.' });
+        const autoSpec = autoCommandSpec(command, root);
+        if (autoSpec) {
+          const result = spawnSync(autoSpec.executable, autoSpec.args, {
+            cwd: root, encoding: 'utf8', timeout: 15000, maxBuffer: 250000,
+            env: safeAutoEnv(),
+          });
+          return jsonResponse(res, 200, { autoExecuted: true, command, exitCode: result.status, stdout: (result.stdout || '').slice(-12000), stderr: (result.stderr || result.error?.message || '').slice(-12000), message: 'Perintah allowlist dijalankan otomatis.' });
+        }
         const id = crypto.randomBytes(8).toString('hex');
         pending.set(id, { type: 'command', target: root, command, description: body.request, preview: command, expires: Date.now() + 15 * 60 * 1000 });
         return jsonResponse(res, 200, { id, type: 'command', target: root, command, message: `Belum dijalankan. Periksa dan setujui: termux-ai approve ${id}` });
@@ -356,16 +407,41 @@ async function startService(args) {
   await new Promise((resolve) => setTimeout(resolve, 400));
   try {
     const status = await serviceRequest(info, 'GET', '/v1/status');
-    console.log(`Layanan lokal aktif di 127.0.0.1:${status.port} (PID ${status.pid}).\nWorkspace dibatasi ke: ${status.workspace}\nLayanan tidak otomatis mulai saat boot. Hentikan dengan: termux-ai service stop`);
+    console.log(`Layanan lokal aktif di 127.0.0.1:${status.port} (PID ${status.pid}).\nWorkspace dibatasi ke: ${status.workspace}\nMulai saat boot: termux-ai service boot install. Hentikan: termux-ai service stop`);
   } catch (error) {
     try { fs.unlinkSync(SERVICE_PATH); } catch {}
     throw new Error(`Daemon gagal mulai; log: ${SERVICE_LOG}. ${error.message}`);
   }
 }
 
+function shellQuote(value) { return `'${String(value).replace(/'/g, "'\\''")}'`; }
+
+async function bootCommand(args) {
+  const [action] = args;
+  if (action === 'status') {
+    console.log(fs.existsSync(BOOT_SCRIPT) ? `Skrip boot terpasang: ${BOOT_SCRIPT}` : 'Skrip boot belum dipasang. Jalankan: termux-ai service boot install');
+    return;
+  }
+  if (action === 'remove') {
+    try { fs.unlinkSync(BOOT_SCRIPT); console.log('Skrip auto-start dihapus.'); }
+    catch (error) { if (error.code === 'ENOENT') console.log('Skrip boot memang belum ada.'); else throw error; }
+    return;
+  }
+  if (action !== 'install') throw new Error('Gunakan: termux-ai service boot install|status|remove');
+  const info = readServiceInfo();
+  const status = await serviceRequest(info, 'GET', '/v1/status');
+  fs.mkdirSync(path.dirname(BOOT_SCRIPT), { recursive: true, mode: 0o700 });
+  const cli = process.env.PREFIX ? path.join(process.env.PREFIX, 'bin', 'termux-ai') : 'termux-ai';
+  const script = `#!/data/data/com.termux/files/usr/bin/sh\n# Generated by termux-ai; no wake lock is acquired.\n${shellQuote(cli)} service start --root ${shellQuote(status.workspace)} --port ${status.port} >> "$HOME/.config/termux-ai/boot.log" 2>&1\n`;
+  fs.writeFileSync(BOOT_SCRIPT, script, { mode: 0o700 });
+  fs.chmodSync(BOOT_SCRIPT, 0o700);
+  console.log(`Skrip mulai-saat-boot dipasang: ${BOOT_SCRIPT}\nPastikan aplikasi Termux:Boot terpasang dari sumber yang sama dengan Termux, lalu buka Termux:Boot sekali.`);
+}
+
 async function serviceCommand(args) {
   const [action, ...rest] = args;
   if (action === 'start') return startService(rest);
+  if (action === 'boot') return bootCommand(rest);
   const info = readServiceInfo();
   if (action === 'status') {
     const status = await serviceRequest(info, 'GET', '/v1/status');
@@ -384,7 +460,7 @@ async function serviceCommand(args) {
     for (const item of result.pending) console.log(`\nID: ${item.id}\nJenis: ${item.type}\nTarget: ${item.target}\n${item.type === 'command' ? `Perintah:\n${item.preview}` : item.preview}\nSetujui: termux-ai approve ${item.id}`);
     return;
   }
-  throw new Error('Gunakan: termux-ai service start|status|pending|stop');
+  throw new Error('Gunakan: termux-ai service start|status|pending|stop|boot');
 }
 
 async function approveAction(id) {
@@ -412,12 +488,21 @@ async function serviceEdit(file, instruction) {
   const info = readServiceInfo();
   const result = await serviceRequest(info, 'POST', '/v1/edit/propose', { file, instruction });
   if (!result.changed) { console.log(result.message); return; }
+  if (result.autoApplied) {
+    console.log(`${result.preview}\n\nDiterapkan otomatis. Backup: ${result.backup}`);
+    return;
+  }
   console.log(`${result.preview}\n\nUsulan ${result.id} belum diterapkan. Untuk meninjau dan menyetujui secara interaktif:\n  termux-ai approve ${result.id}`);
 }
 
 async function serviceCommandProposal(request) {
   const info = readServiceInfo();
   const result = await serviceRequest(info, 'POST', '/v1/command/propose', { request });
+  if (result.autoExecuted) {
+    console.log(`${result.command}\n${result.message}\n${result.stdout || ''}${result.stderr ? `\n${result.stderr}` : ''}`);
+    return;
+  }
+  if (!result.requiresApproval && result.message) { console.log(result.message); return; }
   console.log(`Usulan perintah (belum dijalankan):\n\n${result.command}\n\nTinjau lalu setujui dengan:\n  termux-ai approve ${result.id}`);
 }
 
@@ -490,7 +575,7 @@ async function editFile(fileArg, instruction) {
 }
 
 function showHelp() {
-  console.log(`Asisten coding AI untuk Termux; provider OpenAI-compatible.\n\nPerintah:\n  termux-ai setup\n  termux-ai chat\n  termux-ai service start [--root folder] [--port 18781]\n  termux-ai service status|pending|stop\n  termux-ai ask <pertanyaan> [--file <path-relatif>]\n  termux-ai review [path-relatif]\n  termux-ai edit <file-relatif> <instruksi>\n  termux-ai command <tugas-perintah>\n  termux-ai approve <id-usulan>\n  termux-ai hermes [argumen Hermes...]\n  termux-ai config`);
+  console.log(`Asisten coding AI untuk Termux; provider OpenAI-compatible.\n\nPerintah:\n  termux-ai setup\n  termux-ai chat\n  termux-ai service start [--root folder] [--port 18781]\n  termux-ai service status|pending|stop\n  termux-ai service boot install|status|remove\n  termux-ai ask <pertanyaan> [--file <path-relatif>]\n  termux-ai review [path-relatif]\n  termux-ai edit <file-relatif> <instruksi>\n  termux-ai command <tugas-perintah>\n  termux-ai approve <id-usulan>\n  termux-ai hermes [argumen Hermes...]\n  termux-ai config`);
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -550,4 +635,4 @@ async function main(argv = process.argv.slice(2)) {
 }
 
 if (require.main === module) main();
-module.exports = { safeContextFile, readContext, stripFence, makeDiff, insideWorkspace, loadConfig, main };
+module.exports = { safeContextFile, readContext, stripFence, makeDiff, insideWorkspace, isAutoEditable, autoCommandSpec, loadConfig, main };
