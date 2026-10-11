@@ -93,36 +93,6 @@ async function setup() {
   console.log(`Tersimpan di ${CONFIG_PATH} (izin file dibatasi).`);
 }
 
-function maskToken(token) {
-  if (!token) return 'belum diatur';
-  return `tersimpan (••••${token.slice(-4)})`;
-}
-
-async function tokenCommand(args) {
-  const [action] = args;
-  const config = loadConfig();
-  if (action === 'status' || !action) {
-    console.log(`Provider: ${config.provider_name}\nToken API: ${maskToken(config.api_key)}\nLokasi config: ${CONFIG_PATH}`);
-    return;
-  }
-  if (action === 'set') {
-    const token = await hiddenQuestion('Token API provider (input disembunyikan): ');
-    if (!token) throw new Error('Token kosong; tidak ada perubahan.');
-    config.api_key = token;
-    saveConfig(config);
-    console.log(`Token API tersimpan. Status: ${maskToken(config.api_key)}. Nilai token tidak ditampilkan.`);
-    return;
-  }
-  if (action === 'remove') {
-    if (!config.api_key) { console.log('Tidak ada token API tersimpan.'); return; }
-    config.api_key = '';
-    saveConfig(config);
-    console.log('Token API dihapus dari konfigurasi lokal.');
-    return;
-  }
-  throw new Error('Gunakan: termux-ai token set|status|remove');
-}
-
 async function complete(messages, config = loadConfig()) {
   if (!config.api_key) throw new Error('API key belum diatur. Jalankan: termux-ai setup');
   const url = `${config.base_url.replace(/\/+$/, '')}/chat/completions`;
@@ -611,7 +581,7 @@ async function editFile(fileArg, instruction) {
 }
 
 function showHelp() {
-  console.log(`Asisten coding AI untuk Termux; provider OpenAI-compatible.\n\nPerintah:\n  termux-ai setup\n  termux-ai token set|status|remove\n  termux-ai chat\n  termux-ai all-in-one --root <folder-proyek> [--port 18781]\n  termux-ai service start [--root folder] [--port 18781]\n  termux-ai service status|pending|stop\n  termux-ai service boot install|status|remove\n  termux-ai ask <pertanyaan> [--file <path-relatif>]\n  termux-ai review [path-relatif]\n  termux-ai edit <file-relatif> <instruksi>\n  termux-ai command <tugas-perintah>\n  termux-ai approve <id-usulan>\n  termux-ai hermes [argumen Hermes...]\n  termux-ai config`);
+  console.log(`Asisten coding AI untuk Termux; provider OpenAI-compatible.\n\nPerintah:\n  termux-ai setup\n  termux-ai chat\n  termux-ai all-in-one --root <folder-proyek> [--port 18781]\n  termux-ai service start [--root folder] [--port 18781]\n  termux-ai service status|pending|stop\n  termux-ai service boot install|status|remove\n  termux-ai ask <pertanyaan> [--file <path-relatif>]\n  termux-ai review [path-relatif]\n  termux-ai edit <file-relatif> <instruksi>\n  termux-ai command <tugas-perintah>\n  termux-ai approve <id-usulan>\n  termux-ai hermes [argumen Hermes...]\n  termux-ai config`);
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -629,7 +599,6 @@ async function main(argv = process.argv.slice(2)) {
       return await serviceCommandProposal(args.join(' '));
     }
     if (command === 'setup') return await setup();
-    if (command === 'token') return await tokenCommand(args);
     if (command === 'chat') return await chat();
     if (command === 'ask') {
       const files = [];
@@ -673,4 +642,4 @@ async function main(argv = process.argv.slice(2)) {
 }
 
 if (require.main === module) main();
-module.exports = { safeContextFile, readContext, stripFence, makeDiff, insideWorkspace, isAutoEditable, autoCommandSpec, maskToken, loadConfig, main };
+module.exports = { safeContextFile, readContext, stripFence, makeDiff, insideWorkspace, isAutoEditable, autoCommandSpec, loadConfig, main };
